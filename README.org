@@ -1,0 +1,50 @@
+* INTRODUCTION
+This is a PSHMEM wrapper for an OpenSHMEM 1.5 implementation.
+
+The wrapper outputs a CSV file for every PE, named `pperf.[PE].csv`. These
+are designed to be very easy to turn into a event log for your favorite
+profiling tool. We do not tailor the output to any specific tool.
+
+* OUTPUT FORMAT
+The output format is as follows:
+#+BEGIN_SRC csv
+Time,Function,Duration_Sec,Target_PE,Size_Bytes
+#+END_SRC
+
+Fields that are not applicable for a given function are set to -1.
+
+Since the time is relative to some system wide epoch, the Time column may
+be compared across PEs, but not across different runs of the same program, unless
+the program is run on the same system without rebooting in between runs.
+
+* USAGE
+** GENERATE PSHMEM.H
+#+BEGIN_SRC bash
+$ oshcc -showme
+...
+$ ./gen_pshmem.py
+$ ls include/pshmem.h
+pshmem.h
+#+END_SRC
+** MODIFY YOUR CODE
+In the source file where you initialize OpenSHMEM, replace src_c{#include "shmem.h"} with:
+#+BEGIN_SRC c
+#define SHMEM_PERF_SETUP
+#include "shmem.h"
+#+END_SRC
+** COMPILE
+#+BEGIN_SRC bash
+$ poshcc -o my_program my_program.c
+# or as part of a build system
+CC=poshcc make
+#+END_SRC
+** RUN
+#+BEGIN_SRC bash
+$ oshrun -n 4 ./my_program
+#+END_SRC
+** ANALYZE
+#+BEGIN_SRC bash
+$ cat pperf.000.csv
+Time,Function,Duration_Sec,Target_PE,Size_Bytes
+....
+#+END_SRC
