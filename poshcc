@@ -1,0 +1,18 @@
+#!/bin/bash
+# original oshcc call
+if ! command -v oshcc &> /dev/null; then
+    export PATH="/Users/tyush/Documents/SOS-bin/bin:$PATH"
+fi
+export ORIGINAL=$(oshcc -showme)
+
+# place our include path first
+# replace first whitespace with -I./include
+export REPLACE=$(echo "$ORIGINAL" | sed "s| | -I$(cd "$(dirname "$0")" && pwd)/include |")
+
+# pass through -showme behavior
+if [[ "$@" == *"-showme"* ]]; then
+    echo "$REPLACE"
+    exit 0
+fi
+
+$REPLACE "$@"
