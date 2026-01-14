@@ -71,14 +71,18 @@ def convert_csv_to_perfetto(pattern="pperf.*.csv", output_file="trace.json", bin
             func = row['Function']
             target_pe = int(row.get('Target_PE', -1))
             size = int(row.get('Size_Bytes', 0))
-            bt_raw = row.get('Stacktrace', '').split('|')
-            bt = [addr.strip() for addr in bt_raw if addr.strip()]
+            symbol_trace = row.get('Symboltrace', '')
+            if symbol_trace:
+                bt = [s.strip() for s in symbol_trace.split('|') if s.strip()]
+                resolved_names = bt
+            else:
+                bt_raw = row.get('Stacktrace', '').split('|')
+                bt = [addr.strip() for addr in bt_raw if addr.strip()]
+                resolved_names = [str(addr_map.get(addr, addr)) for addr in bt]
             
             current_parent = None
             # reverse because perfetto 
-            for addr in reversed(bt):
-                name = str(addr_map.get(addr, addr))
-                
+            for name in reversed(resolved_names):
                 if any(x in name for x in ["_osh_log_call", "_osh_wrap_"]):
                     continue
                 

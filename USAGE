@@ -2,3 +2,4 @@
 1. in your main.c, before you import this shmem.h, add the following line:
 #define SHMEM_PERF_SETUP
 2. run your program
+3 (optional). run ./backtrace_of_stacktrace.py

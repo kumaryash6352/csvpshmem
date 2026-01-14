@@ -8,7 +8,7 @@ profiling tool. We do not tailor the output to any specific tool.
 * OUTPUT FORMAT
 The output format is as follows:
 #+BEGIN_SRC csv
-Time,Function,Duration_Sec,Target_PE,Size_Bytes
+Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace
 #+END_SRC
 
 Fields that are not applicable for a given function are set to -1.
@@ -45,9 +45,21 @@ $ oshrun -n 4 ./my_program
 ** ANALYZE
 #+BEGIN_SRC bash
 $ cat pperf.000.csv
-Time,Function,Duration_Sec,Target_PE,Size_Bytes
+Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace,Symboltrace
 ....
 #+END_SRC
+For symbol names,
+#+BEGIN_SRC bash
+$ cat pperf.000.csv
+Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace,Symboltrace
+....
+$ ./backtrace_of_stacktrace.py
+....
+$ cat pperf.000.csv
+Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace,Symboltrace
+....
+#+END_SRC
+
 
 *** PROVIDED CONVERTERS
 **** Parfetto

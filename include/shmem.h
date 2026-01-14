@@ -57,6 +57,7 @@ static inline void _osh_log_call(const char *func_name, double duration,
 }
 
 // beware
+// expansion helper for inline asm in macros
 #ifndef SYM_QUAL_INNER2
 #define SYM_QUAL_INNER2(p, n) #p #n
 #ifndef SYM_QUAL_INNER
