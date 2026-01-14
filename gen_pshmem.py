@@ -29,40 +29,75 @@ real_shmem_h = os.path.join(real_shmem_dir, "shmem.h")
 with open(real_shmem_h, "r") as f:
     real_shmem_content = f.read()
 
-# lifted from tables in shmem.h which were stolen from osss-ucx
-rma_types = [
-    ("float", "float"), ("double", "double"), ("long double", "longdouble"),
-    ("char", "char"), ("signed char", "schar"), ("short", "short"),
-    ("int", "int"), ("long", "long"), ("long long", "longlong"),
-    ("unsigned char", "uchar"), ("unsigned short", "ushort"),
-    ("unsigned int", "uint"), ("unsigned long", "ulong"),
-    ("unsigned long long", "ulonglong"), ("int8_t", "int8"),
-    ("int16_t", "int16"), ("int32_t", "int32"), ("int64_t", "int64"),
-    ("uint8_t", "uint8"), ("uint16_t", "uint16"), ("uint32_t", "uint32"),
-    ("uint64_t", "uint64"), ("size_t", "size"), ("ptrdiff_t", "ptrdiff")
-]
+# types
+# (ct, st) = all_types_map[group][st]
+all_types_map = {
+    # float
+    "float": ("float", "float"), "double": ("double", "double"), "longdouble": ("long double", "longdouble"),
+    # complex
+    "complexd": ("double _Complex", "complexd"), "complexf": ("float _Complex", "complexf"),
+    # signed
+    "char": ("char", "char"), "schar": ("signed char", "schar"), "short": ("short", "short"),
+    "int": ("int", "int"), "long": ("long", "long"), "longlong": ("long long", "longlong"),
+    # unsigned
+    "uchar": ("unsigned char", "uchar"), "ushort": ("unsigned short", "ushort"),
+    "uint": ("unsigned int", "uint"), "ulong": ("unsigned long", "ulong"), "ulonglong": ("unsigned long long", "ulonglong"),
+    # fixed
+    "int8": ("int8_t", "int8"), "int16": ("int16_t", "int16"), "int32": ("int32_t", "int32"), "int64": ("int64_t", "int64"),
+    "uint8": ("uint8_t", "uint8"), "uint16": ("uint16_t", "uint16"), "uint32": ("uint32_t", "uint32"), "uint64": ("uint64_t", "uint64"),
+    # special
+    "size": ("size_t", "size"), "ptrdiff": ("ptrdiff_t", "ptrdiff")
+}
 
-amo_types = [
-    ("int", "int"), ("long", "long"), ("long long", "longlong"),
-    ("unsigned int", "uint"), ("unsigned long", "ulong"),
-    ("unsigned long long", "ulonglong"), ("int32_t", "int32"),
-    ("int64_t", "int64"), ("uint32_t", "uint32"), ("uint64_t", "uint64"),
-    ("size_t", "size"), ("ptrdiff_t", "ptrdiff")
-]
+def select(keys):
+    return [all_types_map[k] for k in keys]
 
-ext_amo_types = [
-    ("float", "float"), ("double", "double"), ("int", "int"),
-    ("long", "long"), ("long long", "longlong"), ("unsigned int", "uint"),
-    ("unsigned long", "ulong"), ("unsigned long long", "ulonglong"),
-    ("int32_t", "int32"), ("int64_t", "int64"), ("uint32_t", "uint32"),
-    ("uint64_t", "uint64"), ("size_t", "size"), ("ptrdiff_t", "ptrdiff")
-]
+rma_types = select([
+    "float", "double", "longdouble",
+    "char", "schar", "short", "int", "long", "longlong",
+    "uchar", "ushort", "uint", "ulong", "ulonglong",
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64", "size", "ptrdiff"
+])
 
-bitwise_amo_types = [
-    ("unsigned int", "uint"), ("unsigned long", "ulong"),
-    ("unsigned long long", "ulonglong"), ("int32_t", "int32"),
-    ("int64_t", "int64"), ("uint32_t", "uint32"), ("uint64_t", "uint64")
+amo_keys = [
+    "int", "long", "longlong",
+    "uint", "ulong", "ulonglong",
+    "int32", "int64", "uint32", "uint64",
+    "size", "ptrdiff"
 ]
+amo_types = select(amo_keys)
+
+ext_amo_types = select(["float", "double"] + amo_keys)
+
+bitwise_amo_types = select([
+    "uint", "ulong", "ulonglong",
+    "int32", "int64", "uint32", "uint64"
+])
+
+reduce_bitwise_types = select([
+    "uchar", "ushort", "uint", "ulong", "ulonglong",
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64", "size"
+])
+
+reduce_minmax_keys = [
+    "char", "schar", "short", "int", "long", "longlong", "ptrdiff",
+    "uchar", "ushort", "uint", "ulong", "ulonglong",
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64", "size",
+    "float", "double", "longdouble"
+]
+reduce_minmax_types = select(reduce_minmax_keys)
+
+reduce_arith_types = select(reduce_minmax_keys + ["complexd", "complexf"])
+
+to_all_bitwise_keys = ["short", "int", "long", "longlong"]
+to_all_bitwise_types = select(to_all_bitwise_keys)
+
+to_all_minmax_types = select(to_all_bitwise_keys + ["float", "double", "longdouble"])
+
+to_all_arith_types = select(to_all_bitwise_keys + ["float", "double", "longdouble", "complexd", "complexf"])
 
 functions = []
 # (ret, name, decl_args, call_args)
@@ -80,6 +115,12 @@ functions.append(("int", "shmem_broadcast64", "(void *dest, const void *source, 
 for ct, st in rma_types:
     functions.append(("void", f"shmem_{st}_put", f"({ct} *dest, const {ct} *src, size_t nelems, int pe)", "(dest, src, nelems, pe)"))
     functions.append(("void", f"shmem_{st}_get", f"({ct} *dest, const {ct} *src, size_t nelems, int pe)", "(dest, src, nelems, pe)"))
+    functions.append(("void", f"shmem_{st}_put_nbi", f"({ct} *dest, const {ct} *src, size_t nelems, int pe)", "(dest, src, nelems, pe)"))
+    functions.append(("void", f"shmem_{st}_get_nbi", f"({ct} *dest, const {ct} *src, size_t nelems, int pe)", "(dest, src, nelems, pe)"))
+    functions.append(("void", f"shmem_{st}_p", f"({ct} *dest, {ct} value, int pe)", "(dest, value, pe)"))
+    functions.append((ct, f"shmem_{st}_g", f"(const {ct} *dest, int pe)", "(dest, pe)"))
+    functions.append(("void", f"shmem_{st}_iput", f"({ct} *dest, const {ct} *src, ptrdiff_t dst, ptrdiff_t sst, size_t nelems, int pe)", "(dest, src, dst, sst, nelems, pe)"))
+    functions.append(("void", f"shmem_{st}_iget", f"({ct} *dest, const {ct} *src, ptrdiff_t dst, ptrdiff_t sst, size_t nelems, int pe)", "(dest, src, dst, sst, nelems, pe)"))
 
 for ct, st in ext_amo_types:
     functions.append(("void", f"shmem_atomic_{st}_fetch", f"({ct} *dest, int pe)", "(dest, pe)"))
@@ -105,6 +146,46 @@ for ct, st in bitwise_amo_types:
         functions.append((ct, fetch_name, f"({ct} *dest, {ct} value, int pe)", "(dest, value, pe)"))
         functions.append(("void", nbi_name, f"({ct} *fetch, {ct} *dest, {ct} value, int pe)", "(fetch, dest, value, pe)"))
         functions.append(("void", name, f"({ct} *dest, {ct} value, int pe)", "(dest, value, pe)"))
+
+# deprecated to_all 
+to_all_bitwise_types = [
+    ("short", "short"), ("int", "int"), ("long", "long"), ("long long", "longlong")
+]
+to_all_minmax_types = [
+    ("short", "short"), ("int", "int"), ("long", "long"), ("long long", "longlong"),
+    ("float", "float"), ("double", "double"), ("long double", "longdouble")
+]
+to_all_arith_types = [
+    ("short", "short"), ("int", "int"), ("long", "long"), ("long long", "longlong"),
+    ("float", "float"), ("double", "double"), ("long double", "longdouble"),
+    ("double _Complex", "complexd"), ("float _Complex", "complexf")
+]
+
+for ct, st in to_all_bitwise_types:
+    for op in ["and", "or", "xor"]:
+        functions.append(("void", f"shmem_{st}_{op}_to_all", f"({ct} *dest, const {ct} *source, int nreduce, int PE_start, int logPE_stride, int PE_size, {ct} *pWrk, long *pSync)", "(dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync)"))
+
+for ct, st in to_all_minmax_types:
+    for op in ["max", "min"]:
+        functions.append(("void", f"shmem_{st}_{op}_to_all", f"({ct} *dest, const {ct} *source, int nreduce, int PE_start, int logPE_stride, int PE_size, {ct} *pWrk, long *pSync)", "(dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync)"))
+
+for ct, st in to_all_arith_types:
+    for op in ["sum", "prod"]:
+        functions.append(("void", f"shmem_{st}_{op}_to_all", f"({ct} *dest, const {ct} *source, int nreduce, int PE_start, int logPE_stride, int PE_size, {ct} *pWrk, long *pSync)", "(dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync)"))
+
+for ct, st in reduce_bitwise_types:
+    for op in ["and", "or", "xor"]:
+        functions.append(("int", f"shmem_{st}_{op}_reduce", f"(shmem_team_t team, {ct} *dest, const {ct} *source, size_t nreduce)", "(team, dest, source, nreduce)"))
+
+for ct, st in reduce_minmax_types:
+    for op in ["max", "min"]:
+        functions.append(("int", f"shmem_{st}_{op}_reduce", f"(shmem_team_t team, {ct} *dest, const {ct} *source, size_t nreduce)", "(team, dest, source, nreduce)"))
+
+for ct, st in reduce_arith_types:
+    for op in ["sum", "prod"]:
+        functions.append(("int", f"shmem_{st}_{op}_reduce", f"(shmem_team_t team, {ct} *dest, const {ct} *source, size_t nreduce)", "(team, dest, source, nreduce)"))
+
+
 
 def get_real_name(name):
     if name in real_shmem_content:

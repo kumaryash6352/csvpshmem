@@ -2,6 +2,7 @@
 #define _SHMEM_H
 
 #include "pshmem.h"
+#include <execinfo.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,8 +44,16 @@ static inline void _osh_log_call(const char *func_name, double duration,
     }
   }
 
-  fprintf(_osh_profile_log, "%.9f,%s,%.9f,%d,%zu\n", start, func_name, duration,
-          target_pe, size);
+  void *buffer[10];
+  int nptrs = backtrace(buffer, 10);
+  char bt_str[256] = "";
+  int offset = 0;
+  for (int i = 0; i < nptrs && offset < 250; i++) {
+    offset += snprintf(bt_str + offset, 256 - offset, "%p|", buffer[i]);
+  }
+
+  fprintf(_osh_profile_log, "%.9f,%s,%.9f,%d,%zu,%s\n", start, func_name,
+          duration, target_pe, size, bt_str);
 }
 
 // beware
@@ -94,7 +103,7 @@ static inline void shmem_init(void) {
 
   if (_osh_profile_log) {
     fprintf(_osh_profile_log,
-            "Time,Function,Duration_Sec,Target_PE,Size_Bytes\n");
+            "Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace\n");
     _osh_log_call("shmem_init", end_t - start_t, start_t, -1, 0);
   }
 }
@@ -285,7 +294,25 @@ static inline void shmem_finalize(void) {
                  (dest, src, nelems, pe), pe, nelems * sizeof(CT))             \
   WRAP_CALL_VOID(shmem_##ST##_get,                                             \
                  (CT * dest, const CT *src, size_t nelems, int pe),            \
-                 (dest, src, nelems, pe), pe, nelems * sizeof(CT))
+                 (dest, src, nelems, pe), pe, nelems * sizeof(CT))             \
+  WRAP_CALL_VOID(shmem_##ST##_put_nbi,                                         \
+                 (CT * dest, const CT *src, size_t nelems, int pe),            \
+                 (dest, src, nelems, pe), pe, nelems * sizeof(CT))             \
+  WRAP_CALL_VOID(shmem_##ST##_get_nbi,                                         \
+                 (CT * dest, const CT *src, size_t nelems, int pe),            \
+                 (dest, src, nelems, pe), pe, nelems * sizeof(CT))             \
+  WRAP_CALL_VOID(shmem_##ST##_p, (CT * dest, CT value, int pe),                \
+                 (dest, value, pe), pe, sizeof(CT))                            \
+  WRAP_CALL_RET(CT, shmem_##ST##_g, (const CT *dest, int pe), (dest, pe), pe,  \
+                sizeof(CT))                                                    \
+  WRAP_CALL_VOID(shmem_##ST##_iput,                                            \
+                 (CT * dest, const CT *src, ptrdiff_t dst, ptrdiff_t sst,      \
+                  size_t nelems, int pe),                                      \
+                 (dest, src, dst, sst, nelems, pe), pe, nelems * sizeof(CT))   \
+  WRAP_CALL_VOID(shmem_##ST##_iget,                                            \
+                 (CT * dest, const CT *src, ptrdiff_t dst, ptrdiff_t sst,      \
+                  size_t nelems, int pe),                                      \
+                 (dest, src, dst, sst, nelems, pe), pe, nelems * sizeof(CT))
 
 SHMEM_STANDARD_RMA_TYPE_TABLE(SHMEM_RMA_HELPER)
 
@@ -354,6 +381,100 @@ SHMEM_STANDARD_AMO_TYPE_TABLE(SHMEM_AMO_ARITH_HELPER)
                  (dest, value, pe), pe, sizeof(CT))
 
 SHMEM_BITWISE_AMO_TYPE_TABLE(SHMEM_AMO_BITWISE_HELPER)
+
+#define SHMEM_TO_ALL_BITWISE_HELPER(CT, ST)                                    \
+  WRAP_CALL_VOID(                                                              \
+      shmem_##ST##_and_to_all,                                                 \
+      (CT * dest, const CT *source, int nreduce, int PE_start,                 \
+       int logPE_stride, int PE_size, CT *pWrk, long *pSync),                  \
+      (dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync),   \
+      -1, nreduce * sizeof(CT))                                                \
+  WRAP_CALL_VOID(                                                              \
+      shmem_##ST##_or_to_all,                                                  \
+      (CT * dest, const CT *source, int nreduce, int PE_start,                 \
+       int logPE_stride, int PE_size, CT *pWrk, long *pSync),                  \
+      (dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync),   \
+      -1, nreduce * sizeof(CT))                                                \
+  WRAP_CALL_VOID(                                                              \
+      shmem_##ST##_xor_to_all,                                                 \
+      (CT * dest, const CT *source, int nreduce, int PE_start,                 \
+       int logPE_stride, int PE_size, CT *pWrk, long *pSync),                  \
+      (dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync),   \
+      -1, nreduce * sizeof(CT))
+
+SHMEM_TO_ALL_BITWISE_TYPE_TABLE(SHMEM_TO_ALL_BITWISE_HELPER)
+
+#define SHMEM_TO_ALL_MINMAX_HELPER(CT, ST)                                     \
+  WRAP_CALL_VOID(                                                              \
+      shmem_##ST##_max_to_all,                                                 \
+      (CT * dest, const CT *source, int nreduce, int PE_start,                 \
+       int logPE_stride, int PE_size, CT *pWrk, long *pSync),                  \
+      (dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync),   \
+      -1, nreduce * sizeof(CT))                                                \
+  WRAP_CALL_VOID(                                                              \
+      shmem_##ST##_min_to_all,                                                 \
+      (CT * dest, const CT *source, int nreduce, int PE_start,                 \
+       int logPE_stride, int PE_size, CT *pWrk, long *pSync),                  \
+      (dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync),   \
+      -1, nreduce * sizeof(CT))
+
+SHMEM_TO_ALL_MINMAX_TYPE_TABLE(SHMEM_TO_ALL_MINMAX_HELPER)
+
+#define SHMEM_TO_ALL_ARITH_HELPER(CT, ST)                                      \
+  WRAP_CALL_VOID(                                                              \
+      shmem_##ST##_sum_to_all,                                                 \
+      (CT * dest, const CT *source, int nreduce, int PE_start,                 \
+       int logPE_stride, int PE_size, CT *pWrk, long *pSync),                  \
+      (dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync),   \
+      -1, nreduce * sizeof(CT))                                                \
+  WRAP_CALL_VOID(                                                              \
+      shmem_##ST##_prod_to_all,                                                \
+      (CT * dest, const CT *source, int nreduce, int PE_start,                 \
+       int logPE_stride, int PE_size, CT *pWrk, long *pSync),                  \
+      (dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync),   \
+      -1, nreduce * sizeof(CT))
+
+SHMEM_TO_ALL_ARITH_TYPE_TABLE(SHMEM_TO_ALL_ARITH_HELPER)
+
+#define SHMEM_REDUCE_BITWISE_HELPER(CT, ST)                                    \
+  WRAP_CALL_RET(                                                               \
+      int, shmem_##ST##_and_reduce,                                            \
+      (shmem_team_t team, CT * dest, const CT *source, size_t nreduce),        \
+      (team, dest, source, nreduce), -1, nreduce * sizeof(CT))                 \
+  WRAP_CALL_RET(                                                               \
+      int, shmem_##ST##_or_reduce,                                             \
+      (shmem_team_t team, CT * dest, const CT *source, size_t nreduce),        \
+      (team, dest, source, nreduce), -1, nreduce * sizeof(CT))                 \
+  WRAP_CALL_RET(                                                               \
+      int, shmem_##ST##_xor_reduce,                                            \
+      (shmem_team_t team, CT * dest, const CT *source, size_t nreduce),        \
+      (team, dest, source, nreduce), -1, nreduce * sizeof(CT))
+
+SHMEM_REDUCE_BITWISE_TYPE_TABLE(SHMEM_REDUCE_BITWISE_HELPER)
+
+#define SHMEM_REDUCE_MINMAX_HELPER(CT, ST)                                     \
+  WRAP_CALL_RET(                                                               \
+      int, shmem_##ST##_max_reduce,                                            \
+      (shmem_team_t team, CT * dest, const CT *source, size_t nreduce),        \
+      (team, dest, source, nreduce), -1, nreduce * sizeof(CT))                 \
+  WRAP_CALL_RET(                                                               \
+      int, shmem_##ST##_min_reduce,                                            \
+      (shmem_team_t team, CT * dest, const CT *source, size_t nreduce),        \
+      (team, dest, source, nreduce), -1, nreduce * sizeof(CT))
+
+SHMEM_REDUCE_MINMAX_TYPE_TABLE(SHMEM_REDUCE_MINMAX_HELPER)
+
+#define SHMEM_REDUCE_ARITH_HELPER(CT, ST)                                      \
+  WRAP_CALL_RET(                                                               \
+      int, shmem_##ST##_sum_reduce,                                            \
+      (shmem_team_t team, CT * dest, const CT *source, size_t nreduce),        \
+      (team, dest, source, nreduce), -1, nreduce * sizeof(CT))                 \
+  WRAP_CALL_RET(                                                               \
+      int, shmem_##ST##_prod_reduce,                                           \
+      (shmem_team_t team, CT * dest, const CT *source, size_t nreduce),        \
+      (team, dest, source, nreduce), -1, nreduce * sizeof(CT))
+
+SHMEM_REDUCE_ARITH_TYPE_TABLE(SHMEM_REDUCE_ARITH_HELPER)
 
 WRAP_CALL_VOID(shmem_barrier_all, (void), (), -1, 0)
 WRAP_CALL_VOID(shmem_fence, (void), (), -1, 0)

@@ -27,7 +27,7 @@ $ ls include/pshmem.h
 pshmem.h
 #+END_SRC
 ** MODIFY YOUR CODE
-In the source file where you initialize OpenSHMEM, replace src_c{#include "shmem.h"} with:
+In the source file where you initialize OpenSHMEM, replace =#include "shmem.h"= with:
 #+BEGIN_SRC c
 #define SHMEM_PERF_SETUP
 #include "shmem.h"
@@ -48,3 +48,13 @@ $ cat pperf.000.csv
 Time,Function,Duration_Sec,Target_PE,Size_Bytes
 ....
 #+END_SRC
+
+*** PROVIDED CONVERTERS
+**** Parfetto
+   #+BEGIN_SRC bash
+   $ ls *.csv
+   pperf.000.csv  ...
+   $ ./csv_to_perfetto.py [my_bin]
+   # this works too, but theres 0 chance at getting symbols
+   $ ./csv_to_perfetto.py
+   #+END_SRC
