@@ -1,7 +1,7 @@
 #ifndef _SHMEM_H
 #define _SHMEM_H
 
-#include "pshmem.h"
+#include <pshmem.h>
 #include <execinfo.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,8 +27,11 @@ static inline double _osh_get_time(void) {
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
+const char* EMPTY_STRING = "";
+
 static inline void _osh_log_call(const char *func_name, double duration,
-                                 double start, int target_pe, size_t size) {
+                                 double start, int target_pe, size_t size,
+                                 char* extra) {
   if (UNLIKELY(_osh_profile_log == NULL)) {
     if (_osh_pe_id == -1) {
       return;
@@ -52,8 +55,8 @@ static inline void _osh_log_call(const char *func_name, double duration,
     offset += snprintf(bt_str + offset, 256 - offset, "%p|", buffer[i]);
   }
 
-  fprintf(_osh_profile_log, "%.9f,%s,%.9f,%d,%zu,%s\n", start, func_name,
-          duration, target_pe, size, bt_str);
+  fprintf(_osh_profile_log, "%.9f,%s,%.9f,%d,%zu,%s,%s\n", start, func_name,
+          duration, target_pe, size, bt_str, extra ? extra : EMPTY_STRING);
 }
 
 // beware
@@ -67,26 +70,22 @@ static inline void _osh_log_call(const char *func_name, double duration,
 #define WRAP_SYM(n) SYM_QUAL_INNER(__USER_LABEL_PREFIX__, _osh_wrap_##n)
 
 #define WRAP_CALL_VOID(FN_NAME, DECL_ARGS, CALL_ARGS, PE, SIZE)                \
-  static inline void FN_NAME DECL_ARGS __asm__(WRAP_SYM(FN_NAME));             \
   static inline void FN_NAME DECL_ARGS {                                       \
     double start_t = _osh_get_time();                                          \
     p##FN_NAME CALL_ARGS;                                                      \
     double end_t = _osh_get_time();                                            \
-    _osh_log_call(#FN_NAME, end_t - start_t, start_t, PE, SIZE);               \
+    _osh_log_call(#FN_NAME, end_t - start_t, start_t, PE, SIZE, NULL);         \
   }
 
 #define WRAP_CALL_RET(RET_TYPE, FN_NAME, DECL_ARGS, CALL_ARGS, PE, SIZE)       \
-  static inline RET_TYPE FN_NAME DECL_ARGS __asm__(WRAP_SYM(FN_NAME));         \
   static inline RET_TYPE FN_NAME DECL_ARGS {                                   \
     double start_t = _osh_get_time();                                          \
     RET_TYPE ret = p##FN_NAME CALL_ARGS;                                       \
     double end_t = _osh_get_time();                                            \
-    _osh_log_call(#FN_NAME, end_t - start_t, start_t, PE, SIZE);               \
+    _osh_log_call(#FN_NAME, end_t - start_t, start_t, PE, SIZE, NULL);         \
     return ret;                                                                \
   }
 
-// magic to make sure we call the right shmem finalize
-static inline void shmem_init(void) __asm__(WRAP_SYM(shmem_init));
 static inline void shmem_init(void) {
   double start_t = _osh_get_time();
 
@@ -104,13 +103,14 @@ static inline void shmem_init(void) {
 
   if (_osh_profile_log) {
     fprintf(_osh_profile_log,
-            "Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace\n");
-    _osh_log_call("shmem_init", end_t - start_t, start_t, -1, 0);
+            "Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace,Extra\n");
+    char* hostname = (char*)malloc(sizeof(char) * 64);
+    gethostname(hostname, 64);
+    _osh_log_call("shmem_init", end_t - start_t, start_t, -1, 0, hostname);
+    free(hostname);
   }
 }
 
-// magic to make sure we call the right shmem finalize
-static inline void shmem_finalize(void) __asm__(WRAP_SYM(shmem_finalize));
 static inline void shmem_finalize(void) {
   double start_t = _osh_get_time();
 
@@ -118,7 +118,7 @@ static inline void shmem_finalize(void) {
 
   double end_t = _osh_get_time();
 
-  _osh_log_call("shmem_finalize", end_t - start_t, start_t, -1, 0);
+  _osh_log_call("shmem_finalize", end_t - start_t, start_t, -1, 0, NULL);
 
   if (_osh_profile_log) {
     fclose(_osh_profile_log);
@@ -318,67 +318,62 @@ static inline void shmem_finalize(void) {
 SHMEM_STANDARD_RMA_TYPE_TABLE(SHMEM_RMA_HELPER)
 
 #define SHMEM_AMO_HELPER(CT, ST)                                               \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_fetch, (CT * dest, int pe), (dest, pe),   \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch, (CT * dest, int pe), (dest, pe),\
                  pe, sizeof(CT))                                               \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_fetch_nbi,                                \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_fetch_nbi,                                \
                  (CT * fetch, CT * dest, int pe), (fetch, dest, pe), pe,       \
                  sizeof(CT))                                                   \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_set, (CT * dest, CT val, int pe),         \
-                 (dest, val, pe), pe, sizeof(CT))                              \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_set_nbi, (CT * dest, CT val, int pe),     \
-                 (dest, val, pe), pe, sizeof(CT))                              \
-  WRAP_CALL_RET(CT, shmem_atomic_##ST##_compare_swap,                          \
-                (CT * dest, CT cond, CT val, int pe), (dest, cond, val, pe),   \
-                pe, sizeof(CT))                                                \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_compare_swap_nbi,                         \
-                 (CT * fetch, CT * dest, CT cond, CT val, int pe),             \
-                 (fetch, dest, cond, val, pe), pe, sizeof(CT))
+  WRAP_CALL_VOID(shmem_##ST##_atomic_set, (CT * dest, CT val, int pe),         \
+                 (dest, val, pe), pe, sizeof(CT))                              
 
 SHMEM_EXTENDED_AMO_TYPE_TABLE(SHMEM_AMO_HELPER)
 
 #define SHMEM_AMO_ARITH_HELPER(CT, ST)                                         \
-  WRAP_CALL_RET(CT, shmem_atomic_##ST##_fetch_inc, (CT * dest, int pe),        \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch_inc, (CT * dest, int pe),        \
                 (dest, pe), pe, sizeof(CT))                                    \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_fetch_inc_nbi,                            \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_fetch_inc_nbi,                            \
                  (CT * fetch, CT * dest, int pe), (fetch, dest, pe), pe,       \
                  sizeof(CT))                                                   \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_inc, (CT * dest, int pe), (dest, pe), pe, \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_inc, (CT * dest, int pe), (dest, pe), pe, \
                  sizeof(CT))                                                   \
-  WRAP_CALL_RET(CT, shmem_atomic_##ST##_fetch_add,                             \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch_add,                             \
                 (CT * dest, CT value, int pe), (dest, value, pe), pe,          \
                 sizeof(CT))                                                    \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_fetch_add_nbi,                            \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_fetch_add_nbi,                            \
                  (CT * fetch, CT * dest, CT value, int pe),                    \
                  (fetch, dest, value, pe), pe, sizeof(CT))                     \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_add, (CT * dest, CT value, int pe),       \
-                 (dest, value, pe), pe, sizeof(CT))
+  WRAP_CALL_VOID(shmem_##ST##_atomic_add, (CT * dest, CT value, int pe),       \
+                 (dest, value, pe), pe, sizeof(CT))                            \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_compare_swap,                          \
+                (CT * dest, CT cond, CT val, int pe), (dest, cond, val, pe),   \
+                pe, sizeof(CT))                                                
 
 SHMEM_STANDARD_AMO_TYPE_TABLE(SHMEM_AMO_ARITH_HELPER)
 
 #define SHMEM_AMO_BITWISE_HELPER(CT, ST)                                       \
-  WRAP_CALL_RET(CT, shmem_atomic_##ST##_fetch_and,                             \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch_and,                             \
                 (CT * dest, CT value, int pe), (dest, value, pe), pe,          \
                 sizeof(CT))                                                    \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_fetch_and_nbi,                            \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_fetch_and_nbi,                            \
                  (CT * fetch, CT * dest, CT value, int pe),                    \
                  (fetch, dest, value, pe), pe, sizeof(CT))                     \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_and, (CT * dest, CT value, int pe),       \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_and, (CT * dest, CT value, int pe),       \
                  (dest, value, pe), pe, sizeof(CT))                            \
-  WRAP_CALL_RET(CT, shmem_atomic_##ST##_fetch_or,                              \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch_or,                              \
                 (CT * dest, CT value, int pe), (dest, value, pe), pe,          \
                 sizeof(CT))                                                    \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_fetch_or_nbi,                             \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_fetch_or_nbi,                             \
                  (CT * fetch, CT * dest, CT value, int pe),                    \
                  (fetch, dest, value, pe), pe, sizeof(CT))                     \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_or, (CT * dest, CT value, int pe),        \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_or, (CT * dest, CT value, int pe),        \
                  (dest, value, pe), pe, sizeof(CT))                            \
-  WRAP_CALL_RET(CT, shmem_atomic_##ST##_fetch_xor,                             \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch_xor,                             \
                 (CT * dest, CT value, int pe), (dest, value, pe), pe,          \
                 sizeof(CT))                                                    \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_fetch_xor_nbi,                            \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_fetch_xor_nbi,                            \
                  (CT * fetch, CT * dest, CT value, int pe),                    \
                  (fetch, dest, value, pe), pe, sizeof(CT))                     \
-  WRAP_CALL_VOID(shmem_atomic_##ST##_xor, (CT * dest, CT value, int pe),       \
+  WRAP_CALL_VOID(shmem_##ST##_atomic_xor, (CT * dest, CT value, int pe),       \
                  (dest, value, pe), pe, sizeof(CT))
 
 SHMEM_BITWISE_AMO_TYPE_TABLE(SHMEM_AMO_BITWISE_HELPER)
@@ -483,7 +478,7 @@ WRAP_CALL_VOID(shmem_quiet, (void), (), -1, 0)
 WRAP_CALL_RET(int, shmem_my_pe, (void), (), -1, 0)
 WRAP_CALL_RET(int, shmem_n_pes, (void), (), -1, 0)
 
-WRAP_CALL_RET(int, shmem_broadcast64,
+WRAP_CALL_VOID(shmem_broadcast64,
               (void *dest, const void *source, size_t nelems, int PE_root,
                int PE_start, int logPE_stride, int PE_size, long *pSync),
               (dest, source, nelems, PE_root, PE_start, logPE_stride, PE_size,
