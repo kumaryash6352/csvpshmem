@@ -1,6 +1,36 @@
 #ifndef _SHMEM_H
 #define _SHMEM_H
 
+#ifdef __linux__
+
+#ifndef _GNU_SOURCE
+#define _OSH_WE_DID_DEF__GNU_SOURCE
+#endif // _GNU_SOURCE
+#ifndef __USE_GNU
+#define _OSH_WE_DID_DEF__USE_GNU
+#endif // __USE_GNU
+
+#define _GNU_SOURCE
+#define __USE_GNU
+
+#include <link.h>
+
+static int _osh_phdr_callback(struct dl_phdr_info *info, size_t size,
+                              void *data) {
+  (void)size;
+  *(uintptr_t *)data = info->dlpi_addr;
+  return 1;
+}
+
+#ifdef _OSH_WE_DID_DEF_GNU_SOURCE
+#undef _GNU_SOURCE
+#endif // _OSH_WE_DID_DEF_GNU_SOURCE
+#ifdef _OSH_WE_DID_DEF__USE_GNU
+#undef __USE_GNU
+#endif // _OSH_WE_DID_DEF__USE_GNU
+       
+#endif // __linux__
+
 #include <execinfo.h>
 #include <pshmem.h>
 #include <stdint.h>
@@ -15,27 +45,16 @@
 #include <mach-o/dyld.h>
 #endif
 
-#ifdef __linux__
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-#include <link.h>
-
-static int _osh_phdr_callback(struct dl_phdr_info *info, size_t size,
-                              void *data) {
-  (void)size;
-  *(uintptr_t *)data = info->dlpi_addr;
-  return 1;
-}
-#endif
 
 #if defined(SHMEM_PERF_SETUP) && !defined(_SHMEM_INSTANTIATED)
 FILE *_osh_profile_log = NULL;
 int _osh_pe_id = -1;
+double _osh_start;
 #define _SHMEM_INSTANTIATED
 #else
 extern FILE *_osh_profile_log;
 extern int _osh_pe_id;
+extern double _osh_start;
 #endif
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
@@ -74,7 +93,7 @@ static inline void _osh_log_call(const char *func_name, double duration,
     offset += snprintf(bt_str + offset, 256 - offset, "%p|", buffer[i]);
   }
 
-  fprintf(_osh_profile_log, "%.9f,%s,%.9f,%d,%zu,%zu,%s,%s\n", start, func_name,
+  fprintf(_osh_profile_log, "%.9f,%s,%.9f,%d,%zu,%zu,%s,%s\n", start - _osh_start, func_name,
           duration, target_pe, bytes_rx, bytes_tx, bt_str,
           extra ? extra : EMPTY_STRING);
 }
@@ -111,6 +130,10 @@ static inline void shmem_init(void) {
   double start_t = _osh_get_time();
 
   pshmem_init();
+  // APPROXIMATELY start of program
+  // this results in shmem_init starting at negative
+  // time, which is ok i guess
+  _osh_start = _osh_get_time();
 
   double end_t = _osh_get_time();
 
