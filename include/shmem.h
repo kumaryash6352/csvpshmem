@@ -1,14 +1,33 @@
 #ifndef _SHMEM_H
 #define _SHMEM_H
 
-#include <pshmem.h>
 #include <execinfo.h>
+#include <pshmem.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
+#ifdef __linux__
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+#include <link.h>
+
+static int _osh_phdr_callback(struct dl_phdr_info *info, size_t size,
+                              void *data) {
+  (void)size;
+  *(uintptr_t *)data = info->dlpi_addr;
+  return 1;
+}
+#endif
 
 #if defined(SHMEM_PERF_SETUP) && !defined(_SHMEM_INSTANTIATED)
 FILE *_osh_profile_log = NULL;
@@ -27,11 +46,11 @@ static inline double _osh_get_time(void) {
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-const char* EMPTY_STRING = "";
+const char *EMPTY_STRING = "";
 
 static inline void _osh_log_call(const char *func_name, double duration,
                                  double start, int target_pe, size_t size,
-                                 char* extra) {
+                                 char *extra) {
   if (UNLIKELY(_osh_profile_log == NULL)) {
     if (_osh_pe_id == -1) {
       return;
@@ -61,6 +80,7 @@ static inline void _osh_log_call(const char *func_name, double duration,
 
 // beware
 // expansion helper for inline asm in macros
+// we don't actually use this anymore but i might want it later
 #ifndef SYM_QUAL_INNER2
 #define SYM_QUAL_INNER2(p, n) #p #n
 #ifndef SYM_QUAL_INNER
@@ -102,11 +122,34 @@ static inline void shmem_init(void) {
   }
 
   if (_osh_profile_log) {
-    fprintf(_osh_profile_log,
-            "Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace,Extra\n");
-    char* hostname = (char*)malloc(sizeof(char) * 64);
+    fprintf(
+        _osh_profile_log,
+        "Time,Function,Duration_Sec,Target_PE,Size_Bytes,Stacktrace,Extra\n");
+    char extra_info[256];
+    char *hostname = (char *)malloc(sizeof(char) * 64);
     gethostname(hostname, 64);
-    _osh_log_call("shmem_init", end_t - start_t, start_t, -1, 0, hostname);
+
+#ifdef __APPLE__
+    intptr_t slide = _dyld_get_image_vmaddr_slide(0);
+    snprintf(extra_info, sizeof(extra_info), "host=%s;slide=%p", hostname,
+             (void *)slide);
+#elif defined(__linux__)
+    // todo: this cannot be the best solution
+    unsigned long slide = 0;
+    FILE *f = fopen("/proc/self/maps", "r");
+    if (f) {
+      if (fscanf(f, "%lx", &slide) != 1) {
+        slide = 0;
+      }
+      fclose(f);
+    }
+    snprintf(extra_info, sizeof(extra_info), "host=%s;slide=%p", hostname,
+             (void *)slide);
+#else
+    snprintf(extra_info, sizeof(extra_info), "host=%s", hostname);
+#endif
+
+    _osh_log_call("shmem_init", end_t - start_t, start_t, -1, 0, extra_info);
     free(hostname);
   }
 }
@@ -318,13 +361,13 @@ static inline void shmem_finalize(void) {
 SHMEM_STANDARD_RMA_TYPE_TABLE(SHMEM_RMA_HELPER)
 
 #define SHMEM_AMO_HELPER(CT, ST)                                               \
-  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch, (CT * dest, int pe), (dest, pe),\
-                 pe, sizeof(CT))                                               \
+  WRAP_CALL_RET(CT, shmem_##ST##_atomic_fetch, (CT * dest, int pe),            \
+                (dest, pe), pe, sizeof(CT))                                    \
   WRAP_CALL_VOID(shmem_##ST##_atomic_fetch_nbi,                                \
                  (CT * fetch, CT * dest, int pe), (fetch, dest, pe), pe,       \
                  sizeof(CT))                                                   \
   WRAP_CALL_VOID(shmem_##ST##_atomic_set, (CT * dest, CT val, int pe),         \
-                 (dest, val, pe), pe, sizeof(CT))                              
+                 (dest, val, pe), pe, sizeof(CT))
 
 SHMEM_EXTENDED_AMO_TYPE_TABLE(SHMEM_AMO_HELPER)
 
@@ -346,7 +389,7 @@ SHMEM_EXTENDED_AMO_TYPE_TABLE(SHMEM_AMO_HELPER)
                  (dest, value, pe), pe, sizeof(CT))                            \
   WRAP_CALL_RET(CT, shmem_##ST##_atomic_compare_swap,                          \
                 (CT * dest, CT cond, CT val, int pe), (dest, cond, val, pe),   \
-                pe, sizeof(CT))                                                
+                pe, sizeof(CT))
 
 SHMEM_STANDARD_AMO_TYPE_TABLE(SHMEM_AMO_ARITH_HELPER)
 
@@ -479,11 +522,11 @@ WRAP_CALL_RET(int, shmem_my_pe, (void), (), -1, 0)
 WRAP_CALL_RET(int, shmem_n_pes, (void), (), -1, 0)
 
 WRAP_CALL_VOID(shmem_broadcast64,
-              (void *dest, const void *source, size_t nelems, int PE_root,
-               int PE_start, int logPE_stride, int PE_size, long *pSync),
-              (dest, source, nelems, PE_root, PE_start, logPE_stride, PE_size,
-               pSync),
-              PE_root, nelems * 8)
+               (void *dest, const void *source, size_t nelems, int PE_root,
+                int PE_start, int logPE_stride, int PE_size, long *pSync),
+               (dest, source, nelems, PE_root, PE_start, logPE_stride, PE_size,
+                pSync),
+               PE_root, nelems * 8)
 
 WRAP_CALL_RET(void *, shmem_malloc, (size_t size), (size), -1, size)
 WRAP_CALL_VOID(shmem_free, (void *ptr), (ptr), -1, 0)
