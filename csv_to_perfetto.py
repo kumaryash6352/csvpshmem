@@ -70,7 +70,8 @@ def convert_csv_to_perfetto(pattern="pperf.*.csv", output_file="trace.json", bin
             dur_sec = float(row['Duration_Sec'])
             func = row['Function']
             target_pe = int(row.get('Target_PE', -1))
-            size = int(row.get('Size_Bytes', 0))
+            bytes_rx = int(row.get('Bytes_RX', 0))
+            bytes_tx = int(row.get('Bytes_TX', 0))
             symbol_trace = row.get('Symboltrace', '')
             if symbol_trace:
                 bt = [s.strip() for s in symbol_trace.split('|') if s.strip()]
@@ -111,7 +112,8 @@ def convert_csv_to_perfetto(pattern="pperf.*.csv", output_file="trace.json", bin
                 "tid": 1,
                 "args": {
                     "target_pe": target_pe,
-                    "size_bytes": size,
+                    "bytes_rx": bytes_rx,
+                    "bytes_tx": bytes_tx,
                     **({"msg": f"To PE {target_pe}"} if target_pe != -1 else {})
                 }
             }
