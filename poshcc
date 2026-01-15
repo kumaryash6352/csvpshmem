@@ -1,7 +1,8 @@
 #!/bin/bash
 # original oshcc call
 if ! command -v oshcc &> /dev/null; then
-    export PATH="/Users/tyush/Documents/SOS-bin/bin:$PATH"
+    echo "couldn't find oshcc!!!!!!"
+    exit 1
 fi
 export ORIGINAL=$(oshcc -showme)
 
